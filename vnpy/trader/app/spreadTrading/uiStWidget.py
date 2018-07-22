@@ -2,6 +2,8 @@
 
 from collections import OrderedDict
 
+from six import text_type
+
 from vnpy.event import Event
 from vnpy.trader.uiQt import QtWidgets, QtCore
 from vnpy.trader.uiBasicWidget import (BasicMonitor, BasicCell, PnlCell,
@@ -338,7 +340,7 @@ class StModeComboBox(QtWidgets.QComboBox):
     #----------------------------------------------------------------------
     def setMode(self):
         """设置模式"""
-        mode = unicode(self.currentText())
+        mode = text_type(self.currentText())
         self.algoEngine.setAlgoMode(self.spreadName, mode)
     
     #----------------------------------------------------------------------
@@ -440,8 +442,12 @@ class StAlgoManager(QtWidgets.QTableWidget):
                    u'状态']
         self.setColumnCount(len(headers))
         self.setHorizontalHeaderLabels(headers)
-        self.horizontalHeader().setResizeMode(QtWidgets.QHeaderView.Stretch)
         
+        try:
+            self.horizontalHeader().setResizeMode(QtWidgets.QHeaderView.Stretch)
+        except AttributeError:
+            self.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+            
         self.verticalHeader().setVisible(False)
         self.setEditTriggers(self.NoEditTriggers)
         

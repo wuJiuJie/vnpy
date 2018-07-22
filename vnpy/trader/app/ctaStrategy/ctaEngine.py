@@ -430,8 +430,9 @@ class CtaEngine(object):
             strategy = self.strategyDict[name]
             
             if not strategy.inited:
-                strategy.inited = True
                 self.callStrategyFunc(strategy, strategy.onInit)
+                strategy.inited = True
+                
                 self.loadSyncData(strategy)                             # 初始化完成后加载同步数据
                 self.subscribeMarketData(strategy)                      # 加载同步数据后再订阅行情
             else:
@@ -643,3 +644,12 @@ class CtaEngine(object):
             else:
                 self.cancelOrder(orderID)
 
+    #----------------------------------------------------------------------
+    def getPriceTick(self, strategy):
+        """获取最小价格变动"""
+        contract = self.mainEngine.getContract(strategy.vtSymbol)
+        if contract:
+            return contract.priceTick
+        return 0
+        
+        

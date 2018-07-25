@@ -1,11 +1,15 @@
 # encoding: UTF-8
 
 '''
+算法交易引擎
 '''
 
 from __future__ import division
+import os
+import importlib
 
 from vnpy.event import Event
+from vnpy.rpc import RpcServer
 from vnpy.trader.vtEvent import EVENT_TIMER, EVENT_TICK, EVENT_ORDER, EVENT_TRADE
 from vnpy.trader.vtConstant import (DIRECTION_LONG, DIRECTION_SHORT, 
                                     PRICETYPE_LIMITPRICE, PRICETYPE_MARKETPRICE,
@@ -13,30 +17,18 @@ from vnpy.trader.vtConstant import (DIRECTION_LONG, DIRECTION_SHORT,
                                     OFFSET_CLOSETODAY, OFFSET_CLOSEYESTERDAY)
 from vnpy.trader.vtObject import VtSubscribeReq, VtOrderReq, VtCancelOrderReq, VtLogData
 
-from .twapAlgo import TwapAlgo
-from .dmaAlgo import DmaAlgo
-from .stopAlgo import StopAlgo
-from .stAlgo import StAlgo
+from .algo import ALGO_DICT
+
 
 EVENT_ALGO_LOG = 'eAlgoLog'         # 算法日志事件
 EVENT_ALGO_PARAM = 'eAlgoParam'     # 算法参数事件
 EVENT_ALGO_VAR = 'eAlgoVar'         # 算法变量事件
 EVENT_ALGO_SETTING = 'eAlgoSetting' # 算法配置事件
 
-
 ALGOTRADING_DB_NAME = 'VnTrader_AlgoTrading_Db'     # AlgoTrading数据库名
 
 SETTING_COLLECTION_NAME = 'AlgoSetting'             # 算法配置集合名
 HISTORY_COLLECTION_NAME = 'AlgoHistory'             # 算法历史集合名
-
-
-ALGO_DICT = {
-    TwapAlgo.templateName: TwapAlgo,
-    DmaAlgo.templateName: DmaAlgo,
-    StopAlgo.templateName: StopAlgo,
-    StAlgo.templateName: StAlgo
-}
-
 
 
 ########################################################################
@@ -48,6 +40,7 @@ class AlgoEngine(object):
         """"""
         self.mainEngine = mainEngine
         self.eventEngine = eventEngine
+        self.rpcServer = None
         
         self.algoDict = {}          # algoName:algo
         self.orderAlgoDict = {}     # vtOrderID:algo
@@ -68,7 +61,8 @@ class AlgoEngine(object):
     #----------------------------------------------------------------------
     def stop(self):
         """停止"""
-        pass
+        if self.rpcServer:
+            self.rpcServer.stop()
     
     #----------------------------------------------------------------------
     def processTickEvent(self, event):
@@ -285,7 +279,6 @@ class AlgoEngine(object):
             return            
         
         return contract
-        
     
     #----------------------------------------------------------------------
     def saveAlgoSetting(self, algoSetting):
@@ -333,4 +326,32 @@ class AlgoEngine(object):
         event = Event(EVENT_ALGO_SETTING)
         event.dict_['data'] = algoSetting
         self.eventEngine.put(event)
+    
+    #----------------------------------------------------------------------
+    def startRpc(self, repPort, pubPort):
+        """启动RPC服务"""
+        if self.rpcServer:
+            return
+        
+        self.rpcServer = AlgoRpcServer(self, repPort, pubPort)
+        self.rpcServer.start()
+        self.writeLog(u'算法交易RPC服务启动成功，REP端口:%s，PUB端口:%s' %(repPort, pubPort))
 
+
+########################################################################
+class AlgoRpcServer(RpcServer):
+    """算法交易RPC服务器"""
+    
+    #----------------------------------------------------------------------
+    def __init__(self, engine, repPort, pubPort):
+        """Constructor"""
+        self.engine = engine
+        repAddress = 'tcp://*:%s' %repPort
+        pubAddress = 'tcp://*:%s' %pubPort
+        
+        super(AlgoRpcServer, self).__init__(repAddress, pubAddress)
+        
+        self.register(self.engine.addAlgo)
+        self.register(self.engine.stopAlgo)
+        self.register(self.engine.stopAll)
+    

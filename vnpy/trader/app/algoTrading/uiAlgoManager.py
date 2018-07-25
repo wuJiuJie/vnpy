@@ -11,11 +11,8 @@ from vnpy.trader.uiQt import QtCore, QtWidgets
 
 from .algoEngine import (EVENT_ALGO_LOG, EVENT_ALGO_PARAM, 
                          EVENT_ALGO_VAR, EVENT_ALGO_SETTING)
+from .algo import WIDGET_DICT
 
-from .twapAlgo import TwapWidget
-from .dmaAlgo import DmaWidget
-from .stopAlgo import StopWidget
-from .stAlgo import StWidget
 
 
 ########################################################################
@@ -55,7 +52,6 @@ class StopButton(QtWidgets.QPushButton):
         """禁用按钮"""
         self.setEnabled(False)
         self.setStyleSheet("color:black;background-color:grey")
-        
 
 
 AlgoCell = QtWidgets.QTableWidgetItem
@@ -303,11 +299,11 @@ class AlgoSettingMonitor(QtWidgets.QTableWidget):
     #----------------------------------------------------------------------
     def initUi(self):
         """初始化界面"""
-        labels = [u'',
+        labels = ['',
+                  '',
                   u'名称',
                   u'算法',
-                  u'参数',
-                  '']
+                  u'参数']
         
         self.setColumnCount(len(labels))
         self.setHorizontalHeaderLabels(labels)
@@ -339,16 +335,16 @@ class AlgoSettingMonitor(QtWidgets.QTableWidget):
             self.insertRow(0)
         
             buttonStart = StartButton(self.algoEngine, setting)
+            buttonDelete = DeleteButton(self.algoEngine, setting)
             cellSettingName = AlgoCell(settingName)
             cellTemplateName = AlgoCell(setting['templateName'])
             cellSettingText = AlgoCell(self.generateText(setting))
-            buttonDelete = DeleteButton(self.algoEngine, setting)
             
             self.setCellWidget(0, 0, buttonStart)
-            self.setItem(0, 1, cellSettingName)
-            self.setItem(0, 2, cellTemplateName)
-            self.setItem(0, 3, cellSettingText)
-            self.setCellWidget(0, 4, buttonDelete)
+            self.setCellWidget(0, 1, buttonDelete)
+            self.setItem(0, 2, cellSettingName)
+            self.setItem(0, 3, cellTemplateName)
+            self.setItem(0, 4, cellSettingText)
             
             self.cellDict[settingName] = {
                 'start': buttonStart,
@@ -383,19 +379,17 @@ class AlgoManager(QtWidgets.QWidget):
     """算法交易管理组件"""
 
     #----------------------------------------------------------------------
-    def __init__(self, algoEngine, eventEngine):
+    def __init__(self, algoEngine, eventEngine, parent=None):
         """Constructor"""
-        super(AlgoManager, self).__init__()
+        super(AlgoManager, self).__init__(parent)
         
         self.algoEngine = algoEngine
         self.eventEngine = eventEngine
         
-        self.initUi()
-        self.addAlgoWidget(TwapWidget)
-        self.addAlgoWidget(DmaWidget)
-        self.addAlgoWidget(StopWidget)
-        self.addAlgoWidget(StWidget)
+        self.widgetDict = {}
         
+        self.initUi()
+        self.changeWidget()
         self.algoEngine.loadAlgoSetting()   # 界面初始化后，再加载算法配置
         
     #----------------------------------------------------------------------
@@ -403,34 +397,67 @@ class AlgoManager(QtWidgets.QWidget):
         """"""
         self.setWindowTitle(u'算法交易')
         
-        buttonWidth = 400
-        buttonHeight = 60        
+        #buttonWidth = 400
+        #buttonHeight = 60        
         
-        self.tab = QtWidgets.QTabWidget()
-        self.tab.setMaximumWidth(buttonWidth)
+        self.comboTemplate = QtWidgets.QComboBox()
+        #self.comboTemplate.setMaximumWidth(buttonWidth)
+        self.comboTemplate.currentIndexChanged.connect(self.changeWidget)
+        
+        vbox = QtWidgets.QVBoxLayout()
+        for templateName, widgetClass in WIDGET_DICT.items():
+            widget = widgetClass(self.algoEngine)
+            #widget.setMaximumWidth(buttonWidth)
+            widget.hide()
+            vbox.addWidget(widget)
+            
+            self.widgetDict[templateName] = widget
+            self.comboTemplate.addItem(templateName)
         
         self.buttonStop = StopButton(self.algoEngine)
-        self.buttonStop.setMaximumWidth(buttonWidth)
-        self.buttonStop.setFixedHeight(buttonHeight)
         
         self.buttonAddAlgo = QtWidgets.QPushButton(u'启动篮子算法')
         self.buttonAddAlgo.setStyleSheet("color:white;background-color:green")
         self.buttonAddAlgo.clicked.connect(self.addAlgoFromCsv)
-        self.buttonAddAlgo.setFixedHeight(buttonHeight)
         
         self.buttonSaveSetting = QtWidgets.QPushButton(u'加载算法配置')
         self.buttonSaveSetting.setStyleSheet("color:white;background-color:blue")
         self.buttonSaveSetting.clicked.connect(self.saveSettingFromCsv)
-        self.buttonSaveSetting.setFixedHeight(buttonHeight)
+        
+        self.lineRepPort = QtWidgets.QLineEdit('8899')
+        self.linePubPort = QtWidgets.QLineEdit('9988')
+        
+        self.buttonStartRpc = QtWidgets.QPushButton(u'启动RPC服务')
+        self.buttonStartRpc.setStyleSheet("color:black;background-color:orange")
+        self.buttonStartRpc.clicked.connect(self.startRpc)
+        
+        label = QtWidgets.QLabel(u'算法类型')
+        label.setFixedWidth(100)
+        
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(label)
+        hbox.addWidget(self.comboTemplate)
+        
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel(u'REP端口'), 0, 0)
+        grid.addWidget(self.lineRepPort, 0, 1)
+        grid.addWidget(QtWidgets.QLabel(u'PUB端口'), 1, 0)
+        grid.addWidget(self.linePubPort, 1, 1)
         
         vbox1 = QtWidgets.QVBoxLayout()
-        vbox1.addWidget(self.tab)
+        vbox1.addLayout(hbox)
+        vbox1.addLayout(vbox)
         vbox1.addStretch()
         vbox1.addWidget(self.buttonStop)
         vbox1.addWidget(self.buttonAddAlgo)
         vbox1.addWidget(self.buttonSaveSetting)
+        vbox1.addStretch()
+        vbox1.addLayout(grid)
+        vbox1.addWidget(self.buttonStartRpc)
         
         workingMonitor = AlgoStatusMonitor(self.algoEngine, AlgoStatusMonitor.MODE_WORKING)
+        workingMonitor.setFixedWidth(1500)
+        
         historyMonitor = AlgoStatusMonitor(self.algoEngine, AlgoStatusMonitor.MODE_HISTORY)
         logMonitor = AlgoLogMonitor(self.algoEngine)        
         settingMonitor = AlgoSettingMonitor(self.algoEngine)
@@ -458,7 +485,17 @@ class AlgoManager(QtWidgets.QWidget):
         hbox2.addLayout(vbox2)
         
         self.setLayout(hbox2)
-        
+    
+    #----------------------------------------------------------------------
+    def changeWidget(self):
+        """"""
+        for widget in self.widgetDict.values():
+            widget.hide()
+            
+        templateName = text_type(self.comboTemplate.currentText())
+        widget = self.widgetDict[templateName]
+        widget.show()
+    
     #----------------------------------------------------------------------
     def addAlgoWidget(self, widgetClass):
         """添加算法控制组件 """
@@ -503,3 +540,22 @@ class AlgoManager(QtWidgets.QWidget):
         l = self.loadCsv(path)
         for setting in l:
             self.algoEngine.addAlgo(setting)
+    
+    #----------------------------------------------------------------------
+    def startRpc(self):
+        """启动算法服务"""
+        try:
+            repPort = int(self.lineRepPort.text())
+            pubPort = int(self.linePubPort.text())
+        except:
+            self.algoEngine.writeLog(u'请检查RPC端口，只能使用整数')
+            return
+        
+        self.algoEngine.startRpc(repPort, pubPort)
+    
+    #----------------------------------------------------------------------
+    def show(self):
+        """"""
+        self.showMaximized()
+        
+        

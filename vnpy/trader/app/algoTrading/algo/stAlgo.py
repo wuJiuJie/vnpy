@@ -6,9 +6,8 @@ from collections import OrderedDict
 from vnpy.trader.vtConstant import (DIRECTION_LONG, DIRECTION_SHORT,
                                     OFFSET_OPEN, OFFSET_CLOSE)
 from vnpy.trader.uiQt import QtWidgets
-
-from .algoTemplate import AlgoTemplate
-from .uiAlgoWidget import AlgoWidget, QtWidgets
+from vnpy.trader.app.algoTrading.algoTemplate import AlgoTemplate
+from vnpy.trader.app.algoTrading.uiAlgoWidget import AlgoWidget, QtWidgets
 
 
 
@@ -16,7 +15,7 @@ from .uiAlgoWidget import AlgoWidget, QtWidgets
 class StAlgo(AlgoTemplate):
     """自成交算法（self trade），用于刷成交量"""
     
-    templateName = 'ST'
+    templateName = u'SelfTrade 刷单'
 
     #----------------------------------------------------------------------
     def __init__(self, engine, setting, algoName):

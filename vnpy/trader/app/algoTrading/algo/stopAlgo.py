@@ -3,39 +3,38 @@
 from __future__ import division
 from collections import OrderedDict
 
+from six import text_type
+
 from vnpy.trader.vtConstant import (DIRECTION_LONG, DIRECTION_SHORT,
                                     OFFSET_OPEN, OFFSET_CLOSE,
-                                    PRICETYPE_LIMITPRICE, PRICETYPE_MARKETPRICE,
-                                    STATUS_REJECTED, STATUS_CANCELLED, STATUS_ALLTRADED)
+                                    STATUS_ALLTRADED, STATUS_CANCELLED, STATUS_REJECTED)
 from vnpy.trader.uiQt import QtWidgets
+from vnpy.trader.app.algoTrading.algoTemplate import AlgoTemplate
+from vnpy.trader.app.algoTrading.uiAlgoWidget import AlgoWidget, QtWidgets
 
-from .algoTemplate import AlgoTemplate
-from .uiAlgoWidget import AlgoWidget, QtWidgets
-
-from six import text_type
 
 
 STATUS_FINISHED = set([STATUS_ALLTRADED, STATUS_CANCELLED, STATUS_REJECTED])
 
 
 ########################################################################
-class DmaAlgo(AlgoTemplate):
-    """DMA算法，直接发出限价或者市价委托"""
+class StopAlgo(AlgoTemplate):
+    """停止单算法，也可以用于止损单"""
     
-    templateName = 'DMA'
+    templateName = u'STOP 条件委托'
 
     #----------------------------------------------------------------------
     def __init__(self, engine, setting, algoName):
         """Constructor"""
-        super(DmaAlgo, self).__init__(engine, setting, algoName)
+        super(StopAlgo, self).__init__(engine, setting, algoName)
         
         # 参数，强制类型转换，保证从CSV加载的配置正确
         self.vtSymbol = str(setting['vtSymbol'])            # 合约代码
         self.direction = text_type(setting['direction'])    # 买卖
-        self.offset = text_type(setting['offset'])          # 开平
-        self.priceType = text_type(setting['priceType'])    # 价格类型
-        self.price = float(setting['price'])                # 价格
+        self.stopPrice = float(setting['stopPrice'])        # 触发价格
         self.totalVolume = float(setting['totalVolume'])    # 数量
+        self.offset = text_type(setting['offset'])          # 开平
+        self.priceAdd = float(setting['priceAdd'])          # 下单时的超价
         
         self.vtOrderID = ''     # 委托号
         self.tradedVolume = 0   # 成交数量
@@ -48,15 +47,37 @@ class DmaAlgo(AlgoTemplate):
     #----------------------------------------------------------------------
     def onTick(self, tick):
         """"""
-        # 发出委托
-        if not self.vtOrderID:
-            if self.direction == DIRECTION_LONG:
-                func = self.buy
-            else:
-                func = self.sell
+        # 如果已经发出委托，则忽略行情事件
+        if self.vtOrderID:
+            return
+        
+        # 如果到达止损位，才触发委托
+        if (self.direction == DIRECTION_LONG and 
+            tick.lastPrice >= self.stopPrice):
+            # 计算超价委托价格
+            price = self.stopPrice + self.priceAdd
+            
+            # 避免价格超过涨停价
+            if tick.upperLimit:    
+                price = min(price, tick.upperLimit)
                 
-            self.vtOrderID = func(self.vtSymbol, self.price, self.totalVolume, 
-                                  self.priceType, self.offset)
+            func = self.buy
+        else:
+            price = self.stopPrice - self.priceAdd
+            
+            if tick.lowerLimit:
+                price = max(price, tick.lowerLimit)
+                
+            func = self.sell
+            
+        self.vtOrderID = func(self.vtSymbol, price, self.volume, offset=self.offset)
+        
+        msg = u'停止单已触发，代码：%s，方向：%s, 价格：%s，数量：%s，开平：%s' %(self.vtSymbol,
+                                                                                self.direction,
+                                                                                self.stopPrice,
+                                                                                self.totalVolume,
+                                                                                self.offset)
+        self.writeLog(msg)
         
         # 更新变量
         self.varEvent()        
@@ -105,23 +126,22 @@ class DmaAlgo(AlgoTemplate):
         d = OrderedDict()
         d[u'代码'] = self.vtSymbol
         d[u'方向'] = self.direction
-        d[u'价格'] = self.price
+        d[u'触发价格'] = self.stopPrice
         d[u'数量'] = self.totalVolume
-        d[u'价格类型'] = self.priceType
         d[u'开平'] = self.offset
         self.putParamEvent(d)
 
 
 ########################################################################
-class DmaWidget(AlgoWidget):
+class StopWidget(AlgoWidget):
     """"""
     
     #----------------------------------------------------------------------
     def __init__(self, algoEngine, parent=None):
         """Constructor"""
-        super(DmaWidget, self).__init__(algoEngine, parent)
+        super(StopWidget, self).__init__(algoEngine, parent)
         
-        self.templateName = DmaAlgo.templateName
+        self.templateName = StopAlgo.templateName
         
     #----------------------------------------------------------------------
     def initAlgoLayout(self):
@@ -143,13 +163,14 @@ class DmaWidget(AlgoWidget):
         self.spinVolume.setMaximum(1000000000)
         self.spinVolume.setDecimals(6)
         
-        self.comboPriceType = QtWidgets.QComboBox()
-        self.comboPriceType.addItems([PRICETYPE_LIMITPRICE, PRICETYPE_MARKETPRICE])
-        self.comboPriceType.setCurrentIndex(0)
-        
         self.comboOffset = QtWidgets.QComboBox()
         self.comboOffset.addItems(['', OFFSET_OPEN, OFFSET_CLOSE])
         self.comboOffset.setCurrentIndex(0)
+        
+        self.spinPriceAdd = QtWidgets.QDoubleSpinBox()
+        self.spinPriceAdd.setMinimum(0)
+        self.spinPriceAdd.setMaximum(1000000000)
+        self.spinPriceAdd.setDecimals(8)        
         
         buttonStart = QtWidgets.QPushButton(u'启动')
         buttonStart.clicked.connect(self.addAlgo)
@@ -166,10 +187,10 @@ class DmaWidget(AlgoWidget):
         grid.addWidget(self.spinPrice, 2, 1)
         grid.addWidget(Label(u'数量'), 3, 0)
         grid.addWidget(self.spinVolume, 3, 1)
-        grid.addWidget(Label(u'类型'), 4, 0)
-        grid.addWidget(self.comboPriceType, 4, 1)
-        grid.addWidget(Label(u'开平'), 5, 0)
-        grid.addWidget(self.comboOffset, 5, 1)
+        grid.addWidget(Label(u'开平'), 4, 0)
+        grid.addWidget(self.comboOffset, 4, 1)
+        grid.addWidget(Label(u'超价'), 5, 0)
+        grid.addWidget(self.spinPriceAdd, 5, 1)        
         
         return grid
     
@@ -177,13 +198,13 @@ class DmaWidget(AlgoWidget):
     def getAlgoSetting(self):
         """"""
         setting = OrderedDict()
-        setting['templateName'] = DmaAlgo.templateName
+        setting['templateName'] = StopAlgo.templateName
         setting['vtSymbol'] = str(self.lineSymbol.text())
         setting['direction'] = text_type(self.comboDirection.currentText())
-        setting['price'] = float(self.spinPrice.value())
+        setting['stopPrice'] = float(self.spinPrice.value())
         setting['totalVolume'] = float(self.spinVolume.value())
-        setting['priceType'] = text_type(self.comboPriceType.currentText())
         setting['offset'] = text_type(self.comboOffset.currentText())
+        setting['priceAdd'] = float(self.spinPriceAdd.value())
         
         return setting
     

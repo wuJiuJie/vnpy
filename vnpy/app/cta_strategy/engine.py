@@ -16,6 +16,7 @@ from vnpy.trader.engine import BaseEngine, MainEngine
 from vnpy.trader.object import (
     OrderRequest,
     SubscribeRequest,
+    HistoryRequest,
     LogData,
     TickData,
     BarData,
@@ -35,7 +36,7 @@ from vnpy.trader.constant import (
     Offset, 
     Status
 )
-from vnpy.trader.utility import load_json, save_json, extract_vt_symbol
+from vnpy.trader.utility import load_json, save_json, extract_vt_symbol, round_to
 from vnpy.trader.database import database_manager
 from vnpy.trader.rqdata import rqdata_client
 
@@ -97,6 +98,8 @@ class CtaEngine(BaseEngine):
         self.rq_client = None
         self.rq_symbols = set()
 
+        self.vt_tradeids = set()    # for filtering duplicate trade
+
         self.offset_converter = OffsetConverter(self.main_engine)
 
     def init_engine(self):
@@ -111,7 +114,7 @@ class CtaEngine(BaseEngine):
 
     def close(self):
         """"""
-        pass
+        self.stop_all_strategies()
 
     def register_event(self):
         """"""
@@ -134,9 +137,14 @@ class CtaEngine(BaseEngine):
         """
         Query bar data from RQData.
         """
-        data = rqdata_client.query_bar(
-            symbol, exchange, interval, start, end
+        req = HistoryRequest(
+            symbol=symbol,
+            exchange=exchange,
+            interval=interval,
+            start=start,
+            end=end
         )
+        data = rqdata_client.query_history(req)
         return data
 
     def process_tick_event(self, event: Event):
@@ -179,7 +187,7 @@ class CtaEngine(BaseEngine):
                 stop_orderid=order.vt_orderid,
                 strategy_name=strategy.strategy_name,
                 status=STOP_STATUS_MAP[order.status],
-                vt_orderid=order.vt_orderid,
+                vt_orderids=[order.vt_orderid],
             )
             self.call_strategy_func(strategy, strategy.on_stop_order, so)  
 
@@ -189,6 +197,11 @@ class CtaEngine(BaseEngine):
     def process_trade_event(self, event: Event):
         """"""
         trade = event.data
+
+        # Filter duplicate trade push
+        if trade.vt_tradeid in self.vt_tradeids:
+            return
+        self.vt_tradeids.add(trade.vt_tradeid)
 
         self.offset_converter.update_trade(trade)
 
@@ -451,7 +464,11 @@ class CtaEngine(BaseEngine):
         if not contract:
             self.write_log(f"委托失败，找不到合约：{strategy.vt_symbol}", strategy)
             return ""
-
+        
+        # Round order price and volume to nearest incremental value
+        price = round_to(price, contract.pricetick)
+        volume = round_to(volume, contract.min_volume)
+        
         if stop:
             if contract.stop_supported:
                 return self.send_server_stop_order(strategy, contract, direction, offset, price, volume, lock)
